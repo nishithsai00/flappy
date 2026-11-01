@@ -49,7 +49,7 @@ function die(){state="dead";deadAt=performance.now();stopBgm();playDeath();
  if(score>best){best=score;try{localStorage.setItem("fb_best",best)}catch(e){}}showOver()}
 function update(dt){
  groundX=(groundX+SPD*dt)%24;
- if(state==="ready"){bird.y=H/2-40+Math.sin(performance.now()/250)*8;return}
+ if(state==="ready"||state==="menu"){bird.y=H/2-40+Math.sin(performance.now()/250)*8;return}
  if(state==="dead"){if(bird.y<H-GROUND-R){bird.v+=GRAV*dt;bird.y=Math.min(bird.y+bird.v*dt,H-GROUND-R);bird.rot=Math.min(bird.rot+dt*6,1.5)}return}
  bird.v+=GRAV*dt;bird.y+=bird.v*dt;bird.rot+=((Math.max(-.5,Math.min(1.3,bird.v/500)))-bird.rot)*Math.min(1,dt*12);
  for(const p of pipes)p.x-=SPD*dt;
