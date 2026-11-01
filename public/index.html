@@ -1,0 +1,116 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#70c5ce"><title>Flappy Studio</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:#16232b;overflow:hidden;font-family:system-ui,-apple-system,sans-serif;touch-action:none;user-select:none;-webkit-user-select:none}
+#wrap{height:100%;display:flex;align-items:center;justify-content:center}
+#box{position:relative;width:min(100vw,calc(100dvh*.5625));aspect-ratio:9/16;overflow:hidden}
+canvas{width:100%;height:100%;display:block}
+#ui{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.panel{pointer-events:auto;background:rgba(10,20,30,.72);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:#fff;border-radius:20px;padding:20px;width:84%;text-align:center}
+.panel h1{margin:0 0 6px;font-size:28px}.panel p{margin:4px 0 12px;opacity:.85}
+.big{font-size:44px;font-weight:800;margin:0}
+button,label.btn{display:block;width:100%;margin:8px 0 0;padding:14px;border:0;border-radius:14px;background:#ffd23f;color:#222;font-size:17px;font-weight:700;cursor:pointer;transition:transform .08s}
+button:active,label.btn:active{transform:scale(.97)}
+button.alt,label.btn{background:#ffffff26;color:#fff}
+input[type=file]{display:none}
+#mute{position:absolute;top:calc(10px + env(safe-area-inset-top,0px));right:10px;width:44px;height:44px;padding:0;border-radius:50%;background:#0006;color:#fff;font-size:20px;margin:0}
+small{display:block;margin-top:8px;opacity:.8;word-break:break-all}
+</style></head><body>
+<div id="wrap"><div id="box"><canvas id="c"></canvas><button id="mute" aria-label="Mute">🔊</button><div id="ui"></div></div></div>
+<script>
+"use strict";
+const W=360,H=640,GRAV=1500,FLAP=-430,PW=64,GAP=170,SPD=140,R=18,GROUND=80,SPACING=210,MAXAUDIO=2e6;
+const $=id=>document.getElementById(id),cv=$("c"),ctx=cv.getContext("2d"),ui=$("ui");
+let cfg={image:null,bgm:null,death:null},birdImg=null,sc=1,state="menu",last=0,t0=0;
+let bird,pipes,score,best=0,groundX=0,deadAt=0,muted=false;
+try{best=+localStorage.getItem("fb_best")||0}catch(e){}
+/* ---------- sizing ---------- */
+function fit(){const d=Math.min(devicePixelRatio||1,3),w=$("box").clientWidth;cv.width=Math.round(w*d);cv.height=Math.round(w*d*H/W);sc=cv.width/W}
+new ResizeObserver(fit).observe($("box"));fit();
+/* ---------- audio ---------- */
+let ac=null,bgmEl=null,deathEl=null,synthTimer=null,step=0;
+function audio(){if(!ac){try{ac=new(window.AudioContext||window.webkitAudioContext)()}catch(e){}}if(ac&&ac.state==="suspended")ac.resume()}
+function tone(f,d,type="square",v=.08,at=0){if(!ac||muted)return;const o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime+at;o.type=type;o.frequency.setValueAtTime(f,t);g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.001,t+d);o.connect(g).connect(ac.destination);o.start(t);o.stop(t+d)}
+function startBgm(){stopBgm();if(muted)return;if(cfg.bgm){bgmEl=new Audio(cfg.bgm);bgmEl.loop=true;bgmEl.volume=.5;bgmEl.play().catch(()=>{})}
+else{const n=[262,330,392,523,392,330,294,392];synthTimer=setInterval(()=>{tone(n[step++%n.length],.2,"triangle",.05)},240)}}
+function stopBgm(){if(bgmEl){bgmEl.pause();bgmEl=null}clearInterval(synthTimer);synthTimer=null}
+function playDeath(){if(muted)return;if(cfg.death){deathEl=new Audio(cfg.death);deathEl.volume=.8;deathEl.play().catch(()=>{})}else{[392,330,262,196].forEach((f,i)=>tone(f,.28,"sawtooth",.09,i*.17))}}
+function stopDeath(){if(deathEl){deathEl.pause();deathEl=null}}
+$("mute").onclick=e=>{e.stopPropagation();muted=!muted;$("mute").textContent=muted?"🔇":"🔊";if(muted){stopBgm();stopDeath()}else if(state==="play"||state==="ready")startBgm()};
+/* ---------- game ---------- */
+function reset(){bird={y:H/2-40,v:0,rot:0};pipes=[];score=0;spawn(W+60);spawn(W+60+SPACING)}
+function spawn(x){pipes.push({x,top:70+Math.random()*(H-GROUND-GAP-140),passed:false})}
+function flap(){audio();
+ if(state==="ready"){state="play";startBgm()}
+ if(state==="play"){bird.v=FLAP;tone(660,.09,"square",.06)}}
+function die(){state="dead";deadAt=performance.now();stopBgm();playDeath();
+ if(score>best){best=score;try{localStorage.setItem("fb_best",best)}catch(e){}}showOver()}
+function update(dt){
+ groundX=(groundX+SPD*dt)%24;
+ if(state==="ready"){bird.y=H/2-40+Math.sin(performance.now()/250)*8;return}
+ if(state==="dead"){if(bird.y<H-GROUND-R){bird.v+=GRAV*dt;bird.y=Math.min(bird.y+bird.v*dt,H-GROUND-R);bird.rot=Math.min(bird.rot+dt*6,1.5)}return}
+ bird.v+=GRAV*dt;bird.y+=bird.v*dt;bird.rot+=((Math.max(-.5,Math.min(1.3,bird.v/500)))-bird.rot)*Math.min(1,dt*12);
+ for(const p of pipes)p.x-=SPD*dt;
+ if(pipes[0].x<-PW)pipes.shift();
+ const lx=pipes[pipes.length-1].x;if(lx<W-SPACING+PW)spawn(lx+SPACING);
+ const bx=W*.3,r=R*.82;
+ for(const p of pipes){
+  if(!p.passed&&p.x+PW<bx-R){p.passed=true;score++;tone(880,.07,"triangle",.07)}
+  if(bx+r>p.x&&bx-r<p.x+PW&&(bird.y-r<p.top||bird.y+r>p.top+GAP))return die();}
+ if(bird.y+R>=H-GROUND||bird.y-R<-60)die();
+}
+function pipe(x,y,h,flip){const g=ctx.createLinearGradient(x,0,x+PW,0);g.addColorStop(0,"#5cb85c");g.addColorStop(.5,"#9be37a");g.addColorStop(1,"#3d8f3d");ctx.fillStyle=g;
+ ctx.fillRect(x,y,PW,h);const cy=flip?y+h-24:y;ctx.fillRect(x-4,cy,PW+8,24);ctx.strokeStyle="#2c6e2c";ctx.lineWidth=2;ctx.strokeRect(x,y,PW,h);ctx.strokeRect(x-4,cy,PW+8,24)}
+function draw(){
+ ctx.setTransform(sc,0,0,sc,0,0);
+ const s=ctx.createLinearGradient(0,0,0,H);s.addColorStop(0,"#5ec2e6");s.addColorStop(1,"#d9f3ff");ctx.fillStyle=s;ctx.fillRect(0,0,W,H);
+ ctx.fillStyle="#ffffffaa";for(let i=0;i<4;i++){const cx=((i*170-performance.now()/90)%(W+120)+W+120)%(W+120)-60;ctx.beginPath();ctx.arc(cx,100+i*60,24,0,7);ctx.arc(cx+26,106+i*60,18,0,7);ctx.arc(cx-24,108+i*60,16,0,7);ctx.fill()}
+ for(const p of pipes){pipe(p.x,0,p.top,true);pipe(p.x,p.top+GAP,H-GROUND-p.top-GAP,false)}
+ ctx.fillStyle="#ded895";ctx.fillRect(0,H-GROUND,W,GROUND);ctx.fillStyle="#7ec850";ctx.fillRect(0,H-GROUND,W,14);
+ ctx.fillStyle="#6aaf3f";for(let x=-24;x<W+24;x+=24){ctx.beginPath();ctx.moveTo(x-groundX,H-GROUND);ctx.lineTo(x+12-groundX,H-GROUND+14);ctx.lineTo(x+24-groundX,H-GROUND);ctx.fill()}
+ ctx.save();ctx.translate(W*.3,bird.y);ctx.rotate(bird.rot);
+ if(birdImg){ctx.beginPath();ctx.arc(0,0,R+4,0,7);ctx.save();ctx.clip();ctx.drawImage(birdImg,-R-4,-R-4,(R+4)*2,(R+4)*2);ctx.restore();ctx.lineWidth=3;ctx.strokeStyle="#fff";ctx.stroke()}
+ else{ctx.fillStyle="#ffd23f";ctx.beginPath();ctx.arc(0,0,R,0,7);ctx.fill();ctx.fillStyle="#fff";ctx.beginPath();ctx.arc(7,-5,6,0,7);ctx.fill();ctx.fillStyle="#222";ctx.beginPath();ctx.arc(9,-5,3,0,7);ctx.fill();ctx.fillStyle="#ff7a2f";ctx.beginPath();ctx.moveTo(14,2);ctx.lineTo(26,6);ctx.lineTo(14,10);ctx.fill()}
+ ctx.restore();
+ if(state!=="menu"){ctx.font="800 56px system-ui,sans-serif";ctx.textAlign="center";ctx.lineWidth=6;ctx.strokeStyle="#0008";ctx.fillStyle="#fff";ctx.strokeText(score,W/2,110);ctx.fillText(score,W/2,110)}
+}
+function loop(t){const dt=Math.min((t-last)/1000||0,.033);last=t;update(dt);draw();requestAnimationFrame(loop)}
+/* ---------- input ---------- */
+cv.addEventListener("pointerdown",e=>{e.preventDefault();if(state==="ready"||state==="play")flap()});
+addEventListener("keydown",e=>{if(e.code==="Space"){e.preventDefault();if(state==="ready"||state==="play")flap()}});
+/* ---------- UI panels ---------- */
+function panel(h){ui.innerHTML=`<div class="panel">${h}</div>`}
+function showMenu(){state="menu";stopBgm();stopDeath();reset();panel(`<h1>Flappy Studio</h1><p>Best: ${best}</p><button id="play">Play</button><button class="alt" id="cust">Customize &amp; Share</button>`);
+ $("play").onclick=()=>{audio();begin()};$("cust").onclick=showCustom}
+function begin(){stopDeath();reset();state="ready";ui.innerHTML=`<div style="color:#fff;font-weight:700;text-shadow:0 2px 6px #0008;margin-top:120px;pointer-events:none">TAP TO FLAP</div>`}
+function showOver(){setTimeout(()=>{if(state!=="dead")return;panel(`<p>Score</p><p class="big">${score}</p><p>Best ${best}</p><button id="again">Play again</button><button class="alt" id="cust">Customize &amp; Share</button>`);
+ $("again").onclick=()=>{audio();begin()};$("cust").onclick=showCustom},450)}
+function showCustom(){state="menu";stopDeath();panel(`<h1>Make it yours</h1>
+<label class="btn">🐦 Bird picture ${cfg.image?"✓":""}<input id="fi" type="file" accept="image/*"></label>
+<label class="btn">🎵 Game music ${cfg.bgm?"✓":""}<input id="fb" type="file" accept="audio/*"></label>
+<label class="btn">💀 Game-over music ${cfg.death?"✓":""}<input id="fd" type="file" accept="audio/*"></label>
+<button class="alt" id="rs">Reset to default</button><button id="sh">Share my version</button><small id="msg"></small><button class="alt" id="bk">Back</button>`);
+ const msg=t=>$("msg").textContent=t;
+ $("fi").onchange=e=>readImg(e.target.files[0],ok=>{msg(ok?"Picture set":"Couldn't read that image");showCustom()});
+ $("fb").onchange=e=>readAud(e.target.files[0],"bgm",m=>{showCustom();$("msg").textContent=m});
+ $("fd").onchange=e=>readAud(e.target.files[0],"death",m=>{showCustom();$("msg").textContent=m});
+ $("rs").onclick=()=>{cfg={image:null,bgm:null,death:null};birdImg=null;showCustom()};
+ $("bk").onclick=showMenu;$("sh").onclick=share}
+function readImg(f,cb){if(!f)return;const u=URL.createObjectURL(f),im=new Image();
+ im.onload=()=>{const c=document.createElement("canvas");c.width=c.height=128;const x=c.getContext("2d"),m=Math.min(im.width,im.height);x.drawImage(im,(im.width-m)/2,(im.height-m)/2,m,m,0,0,128,128);cfg.image=c.toDataURL("image/png");setImg(cfg.image);URL.revokeObjectURL(u);cb(true)};
+ im.onerror=()=>cb(false);im.src=u}
+function setImg(d){if(!d){birdImg=null;return}const i=new Image();i.onload=()=>birdImg=i;i.src=d}
+function readAud(f,key,cb){if(!f)return;if(f.size>MAXAUDIO)return cb("Audio too big (max 2 MB)");const r=new FileReader();r.onload=()=>{cfg[key]=r.result;cb("Audio set")};r.onerror=()=>cb("Couldn't read that file");r.readAsDataURL(f)}
+async function share(){const msg=$("msg");msg.textContent="Creating link…";
+ try{const r=await fetch("/api/share",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(cfg)});
+  if(!r.ok)throw new Error((await r.json()).error||"failed");const {id}=await r.json(),url=location.origin+"/?g="+id;
+  if(navigator.share){try{await navigator.share({title:"Play my Flappy",url})}catch(e){}}
+  else{try{await navigator.clipboard.writeText(url)}catch(e){}}
+  msg.textContent=url}catch(e){msg.textContent="Share failed: "+e.message}}
+async function loadShared(){const id=new URLSearchParams(location.search).get("g");if(!id)return;
+ try{const r=await fetch("/api/share/"+encodeURIComponent(id));if(!r.ok)return;const j=await r.json();cfg={image:j.image,bgm:j.bgm,death:j.death};setImg(cfg.image)}catch(e){}}
+/* ---------- boot ---------- */
+reset();showMenu();loadShared();requestAnimationFrame(loop);
+</script></body></html>
